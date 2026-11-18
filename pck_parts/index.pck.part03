@@ -42987,7 +42987,7 @@ func report() -> Dictionary:
 		"walk_ins_nothing_landed": walk_ins, "damage_dealt": snappedf(damage_dealt, 1.), "dps": snappedf(damage_dealt / maxf(fight_seconds, .01), .1),
 		"combat_state": combat.mobile_state(), "events": events, "shots": shots}
       {
- "about": "AI Playtester personas. Times are real seconds. dodge_lead = how long before the hit lands the persona aims to press dodge (the i-frames last 0.32 s, so ~0.10-0.25 is ideal). notice = chance a warning ring is noticed at all (drops 0.08 for each other warning on screen at once). skill_use = chance a ready skill is pressed promptly instead of forgotten for a few seconds. Groups (Nov 16 2026): five personas per player type, one per class, for party runs (--group=casual|veteran|action). party.follows_mechanics = chance to do a stack/spread at all; greed = extra delay before leaving a floor warning (0-0.5 s x greed); uptime = share of attack/heal tempo kept; heal_at = health share a healer starts healing at. A persona without its own eye uses its archetype's eye in reviews.",
+ "about": "AI Playtester personas. Times are real seconds. dodge_lead = how long before the hit lands the persona aims to press dodge (the i-frames last 0.32 s, so ~0.10-0.25 is ideal). notice = chance a warning ring is noticed at all (drops 0.08 for each other warning on screen at once). skill_use = chance a ready skill is pressed promptly instead of forgotten for a few seconds. Groups (Nov 16 2026): five personas per player type, one per class, for party runs (--group=casual|veteran|action). party.follows_mechanics = chance to do a stack/spread at all; greed = extra delay before leaving a floor warning (0-0.5 s x greed); uptime = share of attack/heal tempo kept; heal_at = health share a healer starts healing at. A persona without its own eye uses its archetype's eye in reviews. sightseer (Nov 18 2026): Wren plays only for the look of the game; in no party group. Runs through tools/ai_playtest_v01/sightseer.py (Run AI Sightseer.cmd).",
  "personas": {
   "mobile_casual": {
    "name": "Jess",
@@ -43525,6 +43525,77 @@ func report() -> Dictionary:
     "uptime": 1.0,
     "heal_at": 0.5
    }
+  },
+  "sightseer": {
+   "name": "Wren",
+   "bio": "31, plays anime-style games for the places and the pictures, not the fights. Turns the HUD off when a game lets her, walks instead of fast-travelling, fills a folder with screenshots, and uninstalls the moment a world stops feeling made by hand. Fights only because they stand between her and the next view, with helpers doing most of the work.",
+   "plays_like": [
+    "Genshin Impact",
+    "Wuthering Waves",
+    "Infinity Nikki",
+    "Neverness to Everness",
+    "Ni no Kuni",
+    "Zelda: Tears of the Kingdom",
+    "Final Fantasy XIV (for the vistas)"
+   ],
+   "reaction": 0.42,
+   "reaction_jitter": 0.1,
+   "dodge_lead": 0.4,
+   "timing_jitter": 0.15,
+   "dodge_style": "back",
+   "notice": 0.85,
+   "reads_range": 0.4,
+   "skill_use": 0.75,
+   "skill_delay": 1.0,
+   "super_delay": 1.5,
+   "mashes": true,
+   "mash_interval": 0.3,
+   "engage_range": 12.0,
+   "run_push": 1.0,
+   "eye": {
+    "judges_by": "whether any frame could be kept as a screenshot: one painted style from the sky down to the cobbles, at the distance a player really stands. Her bar is Genshin's Mondstadt and Liyue Harbor, Wuthering Waves' lighting, Infinity Nikki's towns and Ni no Kuni's storybook colour",
+    "notices_first": [
+     "the skyline and the sky: does the town have a silhouette, does the horizon go somewhere",
+     "light: where the sun is, whether shadows ground things, whether colour holds or bleaches",
+     "whether characters and buildings look drawn by the same hand",
+     "the ground under her feet: seams, tiling, floating or sunk things"
+    ],
+    "loves": [
+     "a view with a foreground, a middle and a far distance",
+     "warm, grounded light with readable shadow shapes",
+     "flat, clean cel colour with confident lines on characters and creatures",
+     "small made-by-hand details: signs, laundry, crates, boats, a cat on a wall",
+     "water and sky that move",
+     "enemies whose shape and colour tell you what they are from across the room"
+    ],
+    "needs": [
+     "one art style across heroes, townsfolk, enemies, buildings and effects",
+     "a horizon without a hard edge, a void or a fog wall",
+     "characters that stand on the ground with a shadow",
+     "effects that leave the scene visible",
+     "a HUD that can get out of the way of the picture"
+    ],
+    "turn_offs": [
+     "bleached, over-bright colour or grey mud",
+     "copy-pasted houses and empty streets with nothing to look at",
+     "things appearing as she arrives (pop-in)",
+     "seams, gaps, floating props, clipping",
+     "stiff, sliding or frozen characters",
+     "placeholder boxes, debug text, programmer art",
+     "a mix of styles that shows the joins"
+    ],
+    "quits_when": "three ugly or broken views in a row, or the first time she can see the edge of the world"
+   },
+   "max_deaths": 8,
+   "patience_minutes": 12,
+   "archetype": "sightseer",
+   "class": "Stormstrider",
+   "party": {
+    "follows_mechanics": 0.75,
+    "greed": 0.1,
+    "uptime": 0.6,
+    "heal_at": 0.7
+   }
   }
  },
  "groups": {
@@ -43550,7 +43621,7 @@ func report() -> Dictionary:
    "action_rin"
   ]
  }
-}       {
+}               {
   "after_threshold_seconds": 5.26666666666665,
   "after_threshold_state": "Traversal_IdleBreathing",
   "before_threshold_seconds": 4.01666666666666,
@@ -91030,6 +91101,10 @@ func start() -> void:
 ##  - Lamps and other small lights stop casting shadows (47 lamps + 12 lights in the harbour); the sun still does.
 ##  - A small FPS readout, top right.
 const SCALE_3D := .8
+# Small things (props, lamps, people) far from the camera are not drawn on the web. Big merged pieces (quay, buildings,
+# sea) are never culled. Changes nothing in the art; desktop untouched.
+const CULL_SIZE := 6.
+const CULL_FAR := 55.
 var label: Label
 var clock := 0.
 var light_clock := 0.
@@ -91051,6 +91126,12 @@ func _process(delta: float) -> void:
 		light_clock = 0.
 		for light in get_tree().root.find_children("*", "Light3D", true, false):
 			if not light is DirectionalLight3D and light.shadow_enabled: light.shadow_enabled = false
+		for g in get_tree().root.find_children("*", "GeometryInstance3D", true, false):
+			if g.visibility_range_end > 0. or g.has_meta("web_cull"): continue
+			var box: AABB = g.get_aabb() if g.has_method("get_aabb") else AABB()
+			g.set_meta("web_cull", true)
+			if box.size != Vector3.ZERO and box.size.length() * maxf(g.global_basis.get_scale().x, .01) < CULL_SIZE:
+				g.visibility_range_end = CULL_FAR; g.visibility_range_end_margin = 4.
 	# Where frame time goes, every 5 s, in the browser console (WEB_PERF ...)
 	if report_clock >= 5.:
 		report_clock = 0.
@@ -91058,7 +91139,7 @@ func _process(delta: float) -> void:
 			"physics_ms": snappedf(Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000., .1), "nodes": int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT)),
 			"draw_calls": int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)), "objects": int(Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)),
 			"physics_ticks": Engine.physics_ticks_per_second}))
-    extends "res://web_build_v01/web_base.gd"
+  extends "res://web_build_v01/web_base.gd"
 ## RUNA web build (Nov 17 2026, Joshua: "we want the whole game" - played on his iPhone over GitHub Pages).
 ## On the desktop, Play Runa.cmd starts the game with ~25 RUNA_ settings (City v14, townsfolk, look and speed
 ## switches). A browser has no launcher, so this first scene sets the same ones (runa_env.json) and then opens
@@ -314996,13 +315077,14 @@ anti_aliasing/quality/use_debanding=true
 
 [physics]
 
+common/physics_ticks_per_second.web=30
 common/max_physics_steps_per_frame.web=2
 3d/physics_engine="Jolt Physics"
 
 [editor]
 
 export/convert_text_resources_to_binary=false
-     uid://dmpej0adttt5e
+              uid://dmpej0adttt5e
             uid://b6232wphkekmc
             uid://ditan5g53w5ln
             uid://dlp813mqv6rb7
@@ -341588,12 +341670,4 @@ a?gE?"a?6Ä×>[¶_? ÖC?r™_?jgE?^?ÃC?^?½$E?ñ€\?|RC?|\?aãD?2^?€B?^Œ\?AÄA?B
 ?œãS?È³Î=V?ĞÍ=w´P?Û?È½P?Ìx?p§N?f?°ãS? ïÓ=>f“>À›
 >§R?\?–Z“>”>=«R?Ÿ?ÿÁP?â©?¤F>>šT?La?ÙI>Èœ> T?†~?¸G“>è;>Œ²R?&¶?W¨V?í2?¬V?<4 ?R>ä¦>ı¤T?Q ?¥­8?vu©>ê¹X?' ?¯X?páı>.¯V?ş><7?d¦>pZ?´ş>ØÓ5?L¦>ÕOZ?Ş2û>" X?rû>dÀ5?Rå¢>@4??£>°S4?$’¦>w(Z?È!ø>H4?æ# >Ö±[?f~ø>2?Úz >X›[?Œeõ>µ2?P–£>×]?vJõ>Aî\?\ò>q^?üñ>pm^?"Îî>z`?ü‘î>š`?T_ë>Ç2?àŞ¦>BZ?Üøô>^qX?lãô>ŠX?:ÿ÷>¤V?T-ø>®V?Ø<û>5®T?ÎÔû>d©T?Œş>¸ÄR?áş>á“>Tb>0»R?à« ?ÆàP?á¦ ?‹ÎP?Àº?ß]?„5Á>Ñ\?š8Â>şN\?Ğ3À>,\?h/Á>—±[?,ZÂ>I\[?2À>I[?4`Á>ğŸZ?ÄÂ>SmZ?„À>ÊZ?>ïÁ>v”Y?f¬Ã>¦{Y?x*Á>ÕY?üîÂ>axX?‚>Å>*X??Â> ÷W?ÄˆÄ>&X?ú Á>’W?òáÃ>@ÇW?îÁ>ˆ.W? +Ã>xÕV?ö|Â>kV?ŠÅ>îkW?`lÀ>VW?¶Í¿>yV?ìÎÁ>FX?XQ¿>"ğW? »¾>
 W?2!¾>¥IW?J‡½>—¾V?ú/¿>•kX?K½>X?Â´¼>_ĞW? ¼>ñ–X?~»>JOX?Äôº>Y?
-º>q»ã>ì¥V?;ÒX?ˆº>(,ã>²=W?NuY?È¸¹>®ã>@W?çEY?TG¹>Å)ã> ËW?ŒÛY?°¹>ê¦ã>0ÙW?Ø‚l:´c?r³ã>ÓTX?!©?È"Ï=Ø‚l:\c?ª†?HÌ=L§Y?Ğ>º>éZ?6}¹>ÎæY?’Êº>q<Z?Lº>è0Z?–]»>@|Z?\Ÿº>¿Z?`º>Ûİ>¨k^?f>ä9?àÿZ?¸®¹>’ÏZ?Â_»>è[?Ûº>30[?š%¼>mh[?N‘»>Í«[?¢İ¼>ÿå[?¼>¾5\?~˜½>Pn[?F˜½>æø[?i¾>h”\?ĞK¿>­[?üG¿>”$[?şk¾>aÏZ?¦[¿>â©Z?Ğ˜½>¸OZ?¾>æçY?n¼¿>gŞY?ÄÓ½>ÍxY?¿>ÜY?`‚À>RY?èx¾>¨¢X?jé¿>ª¾X?úà½>½1Y?¦¼>)äX?À¼>¸„Y?<;½>~åY?z/¼>YšY?œ›»>ª8Z?ŠÊ¼>©…Z?0¼> òZ?hÒ¼>HPY?À»>÷#V?^!Á>.·U?Ä>İûT?ú•Ç>ø±?û'l?X'?l?)¿?}šm?X;?§†m?'7—>¤5A?[§?Ôºk?œ;?2£m?Í©?Üo?¢!ü:À…V?e4?È.o?™?kˆm??ın??š?Imp?:?%‘p?˜H?K¼n?¸? 'p?'*?4jq?''?Ë¾q?)¶?q¤r?¦( ?Òvs??ı>Òr?hı>=t?æn)? Í¾<Êp>ñù?Xuú>Ğ[r?¬@p>±i?˜^ú>ÜÅs?£ú>¡8u?w(?€#ã<k>Ül?zµ÷>´ps?>R÷>½æt?¯&? Vİ<ıæö>çYv?g»&?À#=jô>f t?1ô>qv?o‰ñ>bot?oXñ>œéu?ö.ñ> fw?vÏî>ìWt?ãÇñ>aør?JÇô>4/s?÷%õ>¿Íq?VLk><?¾â÷>'r?k>©²?¨Cø>‰¿p?Ñ‚õ>ĞŠp?·]ø>to?gÓõ>Io?Ah¯>åÍj?ßş÷>~n?ˆÿ>.Rö>(áõ>¹õm?¸ı>
-Zö>]Í¯>¨Xi?øâş>H]ó>Ì<ı>.tó>ÂCı>²Mğ>õü>Ô2ğ>b‘ü>Ü°ì>*?ğêj?yû>Êiì>Uˆ*?Qˆj?,?Ç³j?£,?t,j?Ø´ú>Èì>”*?˜j?I¥,?˜i?_ßù>Pœë>á*?+‚i?/£,?—øh?ef>†Û»>¬ *?1éh?> ,?ñRh?àªc>î»>"*?´=h?’œ,?7•g?÷o`>.¼>H™*? sg?(™,?]¹f?²>\>)¼>•*?]lf?„™,?7›e?»:W>HG¼>U–*?×1e?ƒ·,?6<d?±×Q>$l¼>±µ*?>äc?¤M>Ö¸>,Ç,?¤Äb?->L>¼¼>xá*?„Šb?õÕG>Èi¸>@¯,?¡Ga?{ŒF>¼P¼>æœA><e¸>®,? ½_?T@>¸¼>úÅ*?Üš_?¤–,?ö^?w„:>Š¼>ãÆ*?^?w4>0­¸>¨†,?n~\?4>|&¼>Ä*?lƒ\?y/.>ê¨¸>‰,?°ğZ?±·->t0¼>
-å'>t¡¸>¬,?˜bY?Ùr'>Â,¼>—ú&>À>:!>º"¼>ê >TÀ>¡ >†BÄ>xÙ>ë¿>Å>2Ä>í,>Ø`È>Š>ÔéÃ>|>È>yA>N!Ì>¾x>Ä˜Ì>¶*>î¼Ï>aÛá>\·V?r‚> QĞ>Pƒá>YPX?’ñİ>\V?Ê‚İ>İ/X?£Ú>ôRV?vÙ>õùW?+hÖ>ÇV?ğÖÕ>Œ®W?+Ó>»U?`È?d#?aÒ>#XW?ÓÙ?	|	?K¹Ñ>­äX?Jï?Âä?€?O	?"›?ªê?¡¸?s?k?«è??b?àµ??Şy ?ÚM?Ì ?ÖÇ?ŒW"?¡M?SO ?è?}+"?Rõ?Ôü#?C?~+$?<k?.È%?´B???xÔ? ÷%?­œ?‹ô>?\/?XÛ@?°Ñ?oÈ@?N0?ËÅB?rÎ?¬¾B?N.?¦ºB?Î?+¼D?¬%?;ÅD?m‡?ÕD?”ğ?¶F?~?/ÉF?Ãä?ßF?æL?r*?Õl>¢šH?êä?Ó¦+?ƒl>u«H?˜L?v7-?dDl>½½H?e´?È‹+?|¬s>-?H†s>~¨.?„hs>ôş,?J{>.?¬{>D0?læz>{s.?ˆ„>Øø/?”_>%q1?ì5>åñ/?¼T…>¢j1?z…>Ø2?
-Ù„>)·s?à ²<‰š1?„²ˆ>|s? sV<ôş2?mˆ>
-Gr?`‡Š<R‡q? Ê¥<#ì6?åĞe?MÏp? ì9<[7?Îôf?a)p?@–l<Ò/7?%Íg?Éªo?`ëˆ<4$5?dëf?ÒC5?£g?šrn?ÀX <£i5?òQh?¬n?€-A<Ö3?Š¢g?LD3?hSh?7l3?»÷h?tl? 6Ù;°ü0?îdh?Õ1?3i?%51?q©i?dÏ.?i?¹Û.?º¸i?Åè.?†Mj?Ã.?»hh?ä0?š³g?†µ.?’µg?CÔ0?òf?.ª.?Ôêf?Ì0?R
-f?¦.?ªïe?Ì0?åÆd?­.?¸”d?Ì0?ó&c?&Ä.?*c?0¼0?Gwa?²¼.?Jma?n0?Ì_?$Ÿ.?jÃ_?<‚0?Ü3^?.?z^?;s0?Ú \?Zv.?Ò‰\?½i0?°[?1r.?ßùZ?6a0?ÒyY?Ñp.?óiY?nX0?âçW?yo.?v×W?Y‘!>Òš¸>š,?ƒÒW?Ës.?«EV?kA>p“¸>‚£,?NCV?“>b¼>cğ>dœ¸>‚¬,?VµT?…Ç>¼>í®>~Ö¿>j…>ü»>>ä´¿>_>²±Ã>=>¤Š¿>Ä >RtÃ>œ>TXÇ>éŞ>ö¶Ç>¬ª>Ê,Ë>èæ>u˜S?.><§Ë>x>š„Î>	¨â>…„S?×Ñ>.!Ï>Ù?â>îU?œåŞ>¼LS?ÂgŞ>ëT?¾%Û>S?)™Ú>&¬T?~–×>\ÄR?›ÿÖ>gT?yQÔ>±uR?>­?E|?¬Ó>ST?„¹?ïÏ?\B?Áƒ?
-U?hÖ?Ìj?4)?µ?´ä?0-?3?ìJ?Vˆ	?† ?#>?ı' ?K	?cÚ!?ŸO?s"? 	?„¦#?g?îĞ#?×½	?<g%?ß‹?FG??¤?,˜%?`ç	?¦*??Tx?A?\?Üî@?Ír?¯ÚB?S?ĞB?tm?$ÀD?}ş?½D?ªa?YºD?êÅ?„ŸF?*S?¾ŸF?‹¸?²¦F?ê?f%? .n>”lH?È¯?(ö&?ğ£m> qH?ã?5‡(?¨3m>t‚H?Ò}?Šğ&?´Şt>Ò~(?¼kt>4*?¨ t>Px(?\|>£*?¸«{>i{+?xw{>'*?~Â>ß„+?¢>"ò,?Jœ>ß‘+?jx…>Ä;>¦ø?È-?Zj…>´">Læ?v.?ôŸ…>¢>Æó?4-?‰>oo">zğ?Ğ«.?T6‰>ß'>†ê?Ô#0?æ‰>É_">jÿ ?>Z(>2û ?wy0?š“Œ>ş_->?å ?íó1?äŒ>ùÇ6?_id?¸•q? Üú;ù'>M#?jã4?Dc?a¡->Ä#?É	5?4d?'	5?Òâe?uò2?f´d?Åö2?.ûe?	3?géf?îÔ2?7&c?¦¼!>¬#?÷¨4?¿oa?­¸2?"|a?8>æ#?²Š4?zÙ_?R›2?Ú_?Çr>:#?)j4?L^?ƒ€2?D^? ¶>M#?àJ4?Å¶\?yl2?­\?Â>à#?ë54?á$[?@[2?Ê[?³[>çô"?U#4?n•Y?ÃK2?R‡Y?Óbÿ= å"?$4?¬X?¤>2?öW?Tô=öÓ"?3ş3?æwV?22?tfV?”R0?ÖUV?ß%2?AÖT?O0?æÂT?Bu.?7²T?hI0?L/S?°u.?Ç S?8¡>z ¸>×³,?&'S?åx.?‰Q?üJ>—¸>½,?7–Q?õ;>àæ»>¯ë>üˆ¸>zÆ,?}P?¾í>\Î»>Õö>:`¿>é$÷=–±»>5÷= .¿>’åö=8çÂ>ÿÈ>Ì/Ã>ÄĞõ=\—Æ>ŞP>>øÆ>Äáó=®.Ê>È¨æ>-hP?FU >‚´Ê>ñ`æ>pR?ûwã>oMP?æã>WèQ?
-áß>iP?åcß>ı­Q?^AÜ>ÍO?0µÛ>¤iQ?ÁØ>H…O?.Ø>Ğ"Q?GÕ>L7O?â–?Í?•îÔ>OÕP?ïŸ?è%?ï?ŠÖ?>-?2.?)Á?lè?¨Ù?2>?ô?¾’?Å ?N?ÛÁ?\¡? ã?ªñ?«!?t¯?_³!?˜ ?qT#?¬½?0|#?p?ú
-%?Ï×?«‚??e"?P7%?¾0?“e??¿ ?ì.A?V"?İA?†³ ?3ôB?åH"?aæB?© ?XÉD?ƒ8"?½ÄD??› ?¸œF?V("?õ›F?¶Š ?hF? í?¯´ ?Dùo>·ZH?Õz ?şF"?¼go>VbH?òß?Ø#?”Ïn>diH?*F?`G"?üzv>™Ù#?`şu>7g%?Üqu>ã#?d{}>©o%?˜}>ó&?ü”|>z%?Öc‚>ó'?¼9‚>Z(?úú>óH>8?ñ'?††><›(?>ß…>è*?È©…>q7>|?k¾(?ˆ‰>±®>u?:*?m‰>î>û?¼¯+?^;‰>W©>†!?g3>Ã!?¹>2 !?ë >Z!?¢>?;'?‰>çZ>Ã!?Ğÿ >õ?ü¸ >ü ?Àö=Ì?[&ö= ò ?o{ë=˜ ?•Óê=Ææ ?Ğ²è=vÂ"?Kë3?éT?Çuß=6İ ?dİ=¼²"?‚Ø3?°ZS?{2?ODS?®ûÑ=€¢"?	Ä3?¨ÊQ?W2??±Q?C0?
+º>q»ã>ì¥V?;ÒX?ˆº>(,ã>²=W?NuY?È¸¹>®ã>@W?çEY?TG¹>Å)ã> ËW?ŒÛY?°¹>ê¦ã>0ÙW?Ø‚l:´c?r³ã>ÓTX?!©?È"Ï=Ø‚l:\c?ª†?HÌ=L§Y?Ğ>º>éZ?6}¹>ÎæY?’Êº>q<Z?Lº>è0Z?–]»>@|Z?\Ÿº>¿Z?`º>Ûİ>¨k^?f>ä9?àÿZ?¸®¹>’ÏZ?Â_»>è[?Ûº>30[?š%¼>mh[?N‘»>Í«[?¢İ¼>ÿå[?¼>¾5\?~˜½>Pn[?F˜½>æø[?i¾>h”\?ĞK¿>­[?üG¿>”$[?şk¾>aÏZ?¦[¿>â©Z?Ğ˜½>¸OZ?¾>æçY?n¼¿>gŞY?ÄÓ½>ÍxY?
