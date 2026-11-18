@@ -25,8 +25,12 @@ jobs:
         run: |
           mkdir site
           cp index.* libterrain.web.*.wasm site/
-          cat pck_parts/index.pck.part* > site/index.pck
-          sha256sum site/index.pck
+          # A new name per build, so browsers and phones never keep an old game file from their cache
+          V=${GITHUB_SHA::8}
+          cat pck_parts/index.pck.part* > site/index-$V.pck
+          SIZE=$(stat -c %s site/index-$V.pck)
+          sed -i "s#\"executable\":\"index\"#\"executable\":\"index\",\"mainPack\":\"index-$V.pck\"#; s#\"index.pck\":[0-9]*#\"index-$V.pck\":$SIZE#; s#src=\"index.js\"#src=\"index.js?v=$V\"#" site/index.html
+          grep -o '"mainPack":"[^"]*"' site/index.html
           ls -la site
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
