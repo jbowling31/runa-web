@@ -91094,52 +91094,100 @@ func start() -> void:
 	for i in 3: await get_tree().process_frame
 	get_tree().change_scene_to_file(DUNGEON)
     extends Node
-## Web performance (Nov 18 2026, Joshua: "it's lagging pretty bad"). Lives on the root for the whole session, so it
-## survives scene changes. Web only (or RUNA_WEB_PERF_TEST=1). Desktop play is untouched.
-##  - 3D drawn at SCALE_3D of the screen, scaled up (with allow_hidpi.web=false in project.godot, the page is drawn at
-##    normal pixel density, not a phone's 3x).
-##  - Lamps and other small lights stop casting shadows (47 lamps + 12 lights in the harbour); the sun still does.
-##  - A small FPS readout, top right.
-const SCALE_3D := .8
-# Small things (props, lamps, people) far from the camera are not drawn on the web. Big merged pieces (quay, buildings,
-# sea) are never culled. Changes nothing in the art; desktop untouched.
+## Web performance + automatic quality (Nov 18 2026, Joshua: "it's lagging pretty bad", then "auto detect: the first
+## one"). Lives on the root for the whole session, so it survives scene changes. Exported builds only (web now, the
+## phone app later) or RUNA_WEB_PERF_TEST=1; desktop play from the editor/launchers is untouched.
+##  - Lamps and other small lights never cast shadows here (47 lamps + 12 lights in the harbour); the sun can.
+##  - Four quality levels. Each step down lowers the 3D resolution, how far small things (props, people, lamps) are
+##    drawn and, at the bottom, the sun's shadows. Big merged pieces (quay, buildings, sea) are always drawn.
+##  - Starts at Medium on a phone, High on a computer, or where it settled last time (user://web_quality.cfg).
+##  - Every 4 s: under DOWN_FPS -> one step down. Above UP_FPS for 12 s -> one step up (at most every 20 s).
+##    The first seconds after a scene change (loading) don't count.
+##  - Top right: "38 fps Â· Medium". Every 5 s the browser console gets WEB_PERF {...}.
+const LEVELS := [
+	{"name": "High", "scale": 1.0, "far": 90., "sun_shadow": true},
+	{"name": "Medium", "scale": .8, "far": 55., "sun_shadow": true},
+	{"name": "Low", "scale": .65, "far": 40., "sun_shadow": true},
+	{"name": "Lowest", "scale": .5, "far": 28., "sun_shadow": false}]
 const CULL_SIZE := 6.
-const CULL_FAR := 55.
+const DOWN_FPS := 24.
+const UP_FPS := 55.
+const SAVE := "user://web_quality.cfg"
+var level := 0
 var label: Label
 var clock := 0.
 var light_clock := 0.
 var report_clock := 0.
+var window_frames := 0
+var window_time := 0.
+var good_for := 0.
+var since_change := 0.
+var settle := 6.
+var last_scene: Node
+var culled: Array = []
+
 func _ready() -> void:
 	name = "WebPerf"; process_mode = Node.PROCESS_MODE_ALWAYS
 	var layer := CanvasLayer.new(); layer.layer = 100; add_child(layer)
 	label = Label.new(); label.add_theme_font_size_override("font_size", 14); label.add_theme_color_override("font_color", Color(1, 1, 1, .8))
-	label.anchor_left = 1.; label.anchor_right = 1.; label.offset_left = -90; label.offset_top = 2; layer.add_child(label)
+	label.anchor_left = 1.; label.anchor_right = 1.; label.offset_left = -150; label.offset_top = 2; layer.add_child(label)
+	var phone := OS.has_feature("web_ios") or OS.has_feature("web_android") or OS.has_feature("ios") or OS.has_feature("android")
+	level = 1 if phone else 0
+	var cfg := ConfigFile.new()
+	if cfg.load(SAVE) == OK: level = clampi(int(cfg.get_value("quality", "level", level)), 0, LEVELS.size() - 1)
+	print("WEB_QUALITY ", JSON.stringify({"start": LEVELS[level].name, "phone": phone}))
+
 func _process(delta: float) -> void:
-	clock += delta
+	window_frames += 1; window_time += delta; since_change += delta; clock += delta
+	if get_tree().current_scene != last_scene: last_scene = get_tree().current_scene; settle = 6.; window_frames = 0; window_time = 0.
+	if settle > 0.: settle -= delta
 	if clock < .5: return
 	clock = 0.
-	label.text = "%d fps" % Engine.get_frames_per_second()
-	var vp := get_viewport()
-	if not is_equal_approx(vp.scaling_3d_scale, SCALE_3D): vp.scaling_3d_scale = SCALE_3D
+	label.text = "%d fps Â· %s" % [Engine.get_frames_per_second(), LEVELS[level].name]
+	apply_level()
 	light_clock += .5; report_clock += .5
 	if light_clock >= 3.:
-		light_clock = 0.
-		for light in get_tree().root.find_children("*", "Light3D", true, false):
-			if not light is DirectionalLight3D and light.shadow_enabled: light.shadow_enabled = false
-		for g in get_tree().root.find_children("*", "GeometryInstance3D", true, false):
-			if g.visibility_range_end > 0. or g.has_meta("web_cull"): continue
-			var box: AABB = g.get_aabb() if g.has_method("get_aabb") else AABB()
-			g.set_meta("web_cull", true)
-			if box.size != Vector3.ZERO and box.size.length() * maxf(g.global_basis.get_scale().x, .01) < CULL_SIZE:
-				g.visibility_range_end = CULL_FAR; g.visibility_range_end_margin = 4.
-	# Where frame time goes, every 5 s, in the browser console (WEB_PERF ...)
+		light_clock = 0.; scan()
+	if settle <= 0. and window_time >= 4.:
+		var fps := window_frames / window_time; window_frames = 0; window_time = 0.
+		if fps < DOWN_FPS and level < LEVELS.size() - 1: set_level(level + 1, fps)
+		elif fps > UP_FPS:
+			good_for += 4.
+			if good_for >= 12. and level > 0 and since_change >= 20.: set_level(level - 1, fps)
+		else: good_for = 0.
 	if report_clock >= 5.:
 		report_clock = 0.
-		print("WEB_PERF ", JSON.stringify({"fps": Engine.get_frames_per_second(), "process_ms": snappedf(Performance.get_monitor(Performance.TIME_PROCESS) * 1000., .1),
+		print("WEB_PERF ", JSON.stringify({"fps": Engine.get_frames_per_second(), "level": LEVELS[level].name, "process_ms": snappedf(Performance.get_monitor(Performance.TIME_PROCESS) * 1000., .1),
 			"physics_ms": snappedf(Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000., .1), "nodes": int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT)),
-			"draw_calls": int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)), "objects": int(Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)),
-			"physics_ticks": Engine.physics_ticks_per_second}))
-  extends "res://web_build_v01/web_base.gd"
+			"draw_calls": int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)), "objects": int(Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME))}))
+
+func set_level(next: int, fps: float) -> void:
+	print("WEB_QUALITY ", JSON.stringify({"from": LEVELS[level].name, "to": LEVELS[next].name, "fps": snappedf(fps, .1)}))
+	level = next; since_change = 0.; good_for = 0.; settle = 2.
+	var cfg := ConfigFile.new(); cfg.set_value("quality", "level", level); cfg.save(SAVE)
+	for g in culled:
+		if is_instance_valid(g): g.visibility_range_end = float(LEVELS[level].far)
+
+func apply_level() -> void:
+	var vp := get_viewport()
+	if not is_equal_approx(vp.scaling_3d_scale, float(LEVELS[level].scale)): vp.scaling_3d_scale = float(LEVELS[level].scale)
+
+func scan() -> void:
+	var sun_shadow: bool = LEVELS[level].sun_shadow
+	for light in get_tree().root.find_children("*", "Light3D", true, false):
+		if light is DirectionalLight3D:
+			if not light.has_meta("web_shadow"): light.set_meta("web_shadow", light.shadow_enabled)
+			light.shadow_enabled = sun_shadow and bool(light.get_meta("web_shadow"))
+		elif light.shadow_enabled: light.shadow_enabled = false
+	culled = culled.filter(func(g): return is_instance_valid(g))
+	for g in get_tree().root.find_children("*", "GeometryInstance3D", true, false):
+		if g.has_meta("web_cull"): continue
+		g.set_meta("web_cull", true)
+		if g.visibility_range_end > 0.: continue
+		var box: AABB = g.get_aabb() if g.has_method("get_aabb") else AABB()
+		if box.size != Vector3.ZERO and box.size.length() * maxf(g.global_basis.get_scale().x, .01) < CULL_SIZE:
+			g.visibility_range_end = float(LEVELS[level].far); g.visibility_range_end_margin = 4.; culled.append(g)
+ extends "res://web_build_v01/web_base.gd"
 ## RUNA web build (Nov 17 2026, Joshua: "we want the whole game" - played on his iPhone over GitHub Pages).
 ## On the desktop, Play Runa.cmd starts the game with ~25 RUNA_ settings (City v14, townsfolk, look and speed
 ## switches). A browser has no launcher, so this first scene sets the same ones (runa_env.json) and then opens
@@ -341660,14 +341708,4 @@ a?gE?"a?6Ä×>[¶_? ÖC?r™_?jgE?^?ÃC?^?½$E?ñ€\?|RC?|\?aãD?2^?€B?^Œ\?AÄA?B
 @?2%È>IM@?¤pÄ>n@?ú'È>A>n6'?-¶??úNÍ>+Ú>¶Ð&?@?*\Í>Ó¸>|j&?††@?¬mÍ>Bp">äÐ&?¶=">¼i&?_">Â	&?’Î->)&?Ê†->jÇ%?èA->0h%?7>Q%?aé?²áæ>À£6>zî$?å?>æ>Ì!>d4n?%6>š“$?cè?Xå>Úò?þæ>­%>‘&p?Ûò?èWå>Îµ&>p?û?>Ÿä>Ÿ6?>ü#?ª?¨‰å>å…)>€·q?ìõ>> ¤#?ÿ«?"Öä>¸Z*>°¸q?ÝGB?ån?»(>‚s?-8F>~t#?AÌ)>€“s?}A?`cp?iÇA?ÂŽp?pC'>ž’u?í@?âêq?c`@?0 r?¥@?êdr?Ð…n?þC?AÛ>?ãõs?ï??46t?zbo?)S?q?Z?·•*?_o?l5?Yà=?æ@v?|p?æ"	?¾«\?dœ*?Â¨o?¦	?Ä®\?ê=*?iÅ^?Ž‘*?Y²o?§Ý?jšC?H°?À^?‰4*?Çbo?
 æ?°C?hR?|¼^?ÚÑ)?×§E?É”?ÿÙn?ã¹?ŒµE?¹3?£ÅE?*Ñ?HÁC?yï?7½^?rk)?B×E?3j?CÕC?Å†?Ô¾^?ÿ(?ÉèE?îø?^H?ˆ?H?‰ ?8#H?ÎŸ?f,J?K|?­Z?(¬Æ=^@J?•õ?ÑªZ?ýÊ=e_J?ØS?ãžZ?°=Ð=@[X? ¹Ë=âSX?Ð=ìFX?°WÖ=-ýU?0ÐÑ=ªõU?~×=zîU?XuÞ=ñ¼N?S¡?§ìS?0&Ú=ÙN? ¶?ŽúS?ð“á=îN?3  ?7T?ð>ê=+ùU? ç=gO?B»þ>/T?˜aô=KV?Àßð=¹,O?|áû>‰cT?ˆ³ÿ=²òP?žÕþ>%Q?8ü>%Q?ù>{ÑR?Ü/ü>¨ßR?F=ù>ùßR?ö>úâR?VÚò>¯T?®Ïø>­T?¤ õ>ó¦T?”rò>jªT?,:ï>þ›V?Ì
 õ>ØV?àéñ>‡V?Lºî>úVX?dÁñ>AX? •î>è;1?º+§>•äY?àÑñ>Ø±/?.|§>ëÁY?$­î>;)1?’ë£>#›/?˜H¤>ý0?Û >[?¶4ò>Lb/?T:¡>¥r[?’ðî>ñÍ-?†¢¡>Õj[?B»ë>OÞ\?láî>¡Ò\?l¬ë>vÇ\?~nè>½[^?¶›ë>6K^?\aè>B^?r'å>\ó_?œ0è>Gâ_?Höä>•Ï_?èµá>ù—a?|Ÿä>o¯a???Èya? já>"‚a?*©@?(Xa?à?B?@^a?b.Þ>æð_?2¨@?-Ô_?m@B?•`?%??È²a?´Ùç>¿Ûa?Ù€=?21`?á|=?aËa?¢
-ë>b?Bð;?VT`?"ï;?Šxc?ráê>žça?ò8î>èz`?¶b:?™¤c?Zî>«b?€iñ>ð›`?,Ó8?MÏc?j9ñ>(b?´›ô>Ò3`?8Áñ>áH`?Üòô>¾b`?¦-ø>š^?ð/õ>û­^?Ô_ø>0º^?4ˆû>8Ç3?.Y>›]?2pø>fM5?B >*]?Šû>)¾6?p§œ>‰.]?êuþ>s”5?ÚÈŸ>È7?ü~Ÿ>GQ8?|2Ÿ>s.7?
-¢>en8?vO¢>Žm9?ˆ)¢>\q8?ðè¥>9|Z?ìA ?Öq9?
-ß¥>ƒZ?QD?žH:?’Ó¥>ˆZ?Â?2¬9?rv©>`¶X?ô%?g‚:?T€©>²X?éû?B;?ˆ¤©><ªX?9º?ŸV?À?’V?Ó?&ŒV?ò„?ýE>pû
->CT?^!?)B>¬p>Ì‡T?~Á?TM>@>Z{T?ë;?Ñh“>9>Ã¤R?vó?l“>ÄR>[ R?Ôk?Zj“>d >\R?×?3¬P?¤?%©P?>?œP?[o?¼‡N?ï÷?®ãS? 0Ç=†N?>T?”çS?ÀBÄ=ÂˆN?°©?íS?ŽÁ=h	V?XpÃ=$V? ‹À=DV?P:¾=®£w?q»_?¯ZX?ÀP¿=ÑYX?`£¼=x?.üa?†^x?|ùa?–!J?
-è?³«Z?À4»=”x?)Qd?å2J?™2?Ðmx?¾Pd?å»x?iVd?¨èG? ?Ö.n?î?®£w?ÈZf?t{n?,z?"÷w?if?}›>?º|?ÒÄn? H?Ã?x?÷žf?m‰o?Œ?–d=?$­z?vÙo?’q?ë=?à½z?ê=?aax?<ap?rÖ?`›!>å
-}?§°<?ELx?Ô\ç:Â?Po >Ê}?]Um>J©#?`<?ÆJx?.Ú!>¹iz?Ã@=?éáu?LD >«Nz?tÚc>xš#?™³c>¿ð#?œ#>5Ãw?§Y>æ…#?´áX>æ#?š£X>ÝJ$?QÌN>Ó×#?”N>:$?gN>ã$?7&F>0$?yF>p’$?–F>Ýö$?ót?>jµ$?ˆ¨?@þæ>µ‡?>š%?¯§?®¾ç>s·?>Šy%?º¯?\Šè>2ú?üŸç>r?Trè>Ž?Þié>9¹7>,&?Ã ?p~è>¤8>²‹&?F?èlé>
-]8>¶'?'?Òoê>t.>€ú&?Ê¸.>k'?"?/>€(?…Ð">v«'?$#>>9(?st#>ùú(?ëÄ>üN(?Ÿ—>?Ì\Í>JE>˜)?5×=?†gÍ>ß">@ò)?lê<?°„Í>r=?®üÈ>¸Ü;?hDÉ>ˆÊ;? ÜÅ>ó[:?²Æ>”>sp,?Î#:?LGÃ>Ñ>˜ò-?Æœ8?7Ã>ò@>;¤'?ÁE??IÍ>1œ">h:'?O4.>i&?\7>É±%?kñ?B©ç>+õ?&Ûæ>ÇX?>$V$?°¨?Ò>æ>­:F><Ñ#?ó%>qu?lO>¤s#?ÿ1$>'Þw?•>?êÂs?9œ=?Ùv?þRp?÷@	?ãp?„×?0’E?ôá?V1o?š§?ìG?D§?ZðG?I?ãJ?€?V¬Z? ò½=¹ J?ú;?«Z?ØœÀ=úG?Ìë?\X?¨"Â=5\X?ÀÅ=t&J?ÊÙ?T¬Z?P·Ã=(V?pCÆ=‰V?Ø“É=³\X?è3È=‡‹N?ó?œãS?pˆÊ=9”N?N
-?œãS?È³Î=V?ÐÍ=w´P?Û?È½P?Ìx?p§N?f?°ãS? ïÓ=>f“>À›
->§R?\?–Z“>”>=«R?Ÿ?ÿÁP?â©?¤F>>šT?La?ÙI>Èœ> T?†~?¸G“>è;>Œ²R?&¶?W¨V?í2?¬V?<4 ?R>ä¦>ý¤T?Q ?¥­8?vu©>ê¹X?' ?¯X?páý>.¯V?þ><7?d¦>pZ?´þ>ØÓ5?L¦>ÕOZ?Þ2û>" X?rû>dÀ5?Rå¢>@4??£>°S4?$’¦>w(Z?È!ø>H4?æ# >Ö±[?f~ø>Ž2?Úz >X›[?Œeõ>µ2?P–£>×]?vJõ>Aî\?\ò>q^?üñ>pm^?"Îî>z`?ü‘î>š`?T_ë>Ç2?àÞ¦>BZ?Üøô>^qX?lãô>ŠX?:ÿ÷>¤V?T-ø>®V?Ø<û>5®T?ÎÔû>d©T?Œþ>¸ÄR?žáþ>á“>Tb>0»R?à« ?ÆàP?á¦ ?‹ÎP?Àº?ß]?„5Á>Ñ\?š8Â>þN\?Ð3À>,\?h/Á>—±[?,ZÂ>I\[?2À>I[?4`Á>ðŸZ?ŽÄÂ>SmZ?„À>ÊZ?>ïÁ>v”Y?f¬Ã>¦{Y?x*Á>ÕY?üîÂ>axX?‚>Å>*X??Â> ÷W?ÄˆÄ>&X?ú Á>’W?òáÃ>@ÇW?îÁ>ˆ.W? +Ã>xÕV?ö|Â>kV?ŠÅ>îkW?`lÀ>VW?¶Í¿>yV?ìÎÁ>FX?XQ¿>"ðW? »¾>
-W?2!¾>¥IW?J‡½>—¾V?ú/¿>•kX?K½>X?Â´¼>_ÐW? ¼>ñ–X?~»>JOX?Äôº>žY?
-º>q»ã>ì¥V?;ÒX?ˆº>(,ã>²=W?NuY?È¸¹>®ã>Ž@W?çEY?TG¹>Å)ã> ËW?ŒÛY?°¹>ê¦ã>0ÙW?Ø‚l:´c?r³ã>ÓTX?!©?È"Ï=Ø‚l:\c?ª†?HÌ=L§Y?Ð>º>éZ?6}¹>ÎæY?’Êº>q<Z?Lº>è0Z?–]»>@|Z?\Ÿº>¿Z?`º>ÛÝ>¨k^?f>ä9?àÿZ?¸®¹>’ÏZ?Â_»>è[?Ûº>30[?š%¼>mh[?N‘»>Í«[?¢Ý¼>ÿå[?¼>¾5\?~˜½>Pn[?F˜½>æø[?i¾>h”\?ÐK¿>­[?üG¿>”$[?þk¾>aÏZ?¦[¿>â©Z?Ð˜½>¸OZ?Ž¾>æçY?n¼¿>gÞY?ÄÓ½>ÍxY?
+ë>b?Bð;?VT`?"ï;?Šxc?ráê>žça?
