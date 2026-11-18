@@ -90887,7 +90887,13 @@ var note: Label
 # raw_manifest.json); here each is written where the game will look for it: the same globalize_path() the scripts
 # use, in the browser's own file system. RUNA_WEBRAW_TEST=1 does the same on a desktop test of the exported pack.
 const RAW_MANIFEST := "res://web_build_v01/raw_manifest.json"
+func add_web_perf() -> void:
+	if not (OS.has_feature("web") or OS.get_environment("RUNA_WEB_PERF_TEST") == "1"): return
+	if get_tree().root.has_node("WebPerf"): return
+	get_tree().root.add_child.call_deferred(preload("res://web_build_v01/web_perf.gd").new())
+
 func place_raw_models() -> void:
+	add_web_perf()
 	if note == null: note = Label.new()
 	if not (OS.has_feature("web") or OS.get_environment("RUNA_WEBRAW_TEST") == "1"): return
 	var rows = JSON.parse_string(FileAccess.get_file_as_string(RAW_MANIFEST)) if FileAccess.file_exists(RAW_MANIFEST) else []
@@ -90906,7 +90912,7 @@ func place_raw_models() -> void:
 			note.text = "RUNA\n\nPreparing models %d / %d" % [i + 1, rows.size()]
 			await get_tree().process_frame
 	print("RUNA_WEB_RAW ", JSON.stringify({"placed": placed, "failed": failed.size(), "first_failed": failed.slice(0, 3), "example": ProjectSettings.globalize_path("res://../x")}))
-   extends "res://web_build_v01/web_base.gd"
+               extends "res://web_build_v01/web_base.gd"
 ## RUNA web build - Harbor Rescue only (Nov 17 2026, Joshua: "let's do the harbor for now so I can see how it plays").
 ## Pick a class, play the dungeon with the AI party. The class goes in on the same ticket Dawncrest uses; its
 ## return_scene brings a cleared run back here.
@@ -91016,7 +91022,31 @@ func start() -> void:
 	f.store_string(JSON.stringify({"class": picked, "health_share": 1., "level": 1, "return_scene": "res://web_build_v01/WebHarbor.tscn"})); f.close()
 	for i in 3: await get_tree().process_frame
 	get_tree().change_scene_to_file(DUNGEON)
-    extends "res://web_build_v01/web_base.gd"
+    extends Node
+## Web performance (Nov 18 2026, Joshua: "it's lagging pretty bad"). Lives on the root for the whole session, so it
+## survives scene changes. Web only (or RUNA_WEB_PERF_TEST=1). Desktop play is untouched.
+##  - 3D drawn at SCALE_3D of the screen, scaled up (with allow_hidpi.web=false in project.godot, the page is drawn at
+##    normal pixel density, not a phone's 3x).
+##  - Lamps and other small lights stop casting shadows (47 lamps + 12 lights in the harbour); the sun still does.
+##  - A small FPS readout, top right.
+const SCALE_3D := .8
+var label: Label
+var clock := 0.
+func _ready() -> void:
+	name = "WebPerf"; process_mode = Node.PROCESS_MODE_ALWAYS
+	var layer := CanvasLayer.new(); layer.layer = 100; add_child(layer)
+	label = Label.new(); label.add_theme_font_size_override("font_size", 14); label.add_theme_color_override("font_color", Color(1, 1, 1, .8))
+	label.anchor_left = 1.; label.anchor_right = 1.; label.offset_left = -90; label.offset_top = 2; layer.add_child(label)
+func _process(delta: float) -> void:
+	clock += delta
+	if clock < .5: return
+	clock = 0.
+	label.text = "%d fps" % Engine.get_frames_per_second()
+	var vp := get_viewport()
+	if not is_equal_approx(vp.scaling_3d_scale, SCALE_3D): vp.scaling_3d_scale = SCALE_3D
+	for light in get_tree().root.find_children("*", "Light3D", true, false):
+		if not light is DirectionalLight3D and light.shadow_enabled: light.shadow_enabled = false
+              extends "res://web_build_v01/web_base.gd"
 ## RUNA web build (Nov 17 2026, Joshua: "we want the whole game" - played on his iPhone over GitHub Pages).
 ## On the desktop, Play Runa.cmd starts the game with ~25 RUNA_ settings (City v14, townsfolk, look and speed
 ## switches). A browser has no launcher, so this first scene sets the same ones (runa_env.json) and then opens
@@ -291603,8 +291633,8 @@ func setup(owner_actor: CharacterBody3D, spec: Dictionary) -> void:
 	var path: String="res://"+str(spec.model)
 	if not scenes.has(path):
 		var doc:=GLTFDocument.new();var state:=GLTFState.new()
-		assert(doc.append_from_file(path,state)==OK,"Reviewed creature failed to load: "+path)
-		var source:=doc.generate_scene(state);var packed:=PackedScene.new();assert(packed.pack(source)==OK);source.free();scenes[path]=packed
+		var loaded:=doc.append_from_file(path,state);assert(loaded==OK,"Reviewed creature failed to load: "+path)
+		var source:=doc.generate_scene(state);var packed:=PackedScene.new();var packed_ok:=packed.pack(source);assert(packed_ok==OK);source.free();scenes[path]=packed
 	model=scenes[path].instantiate();add_child(model);player=find_player(model);assert(player!=null)
 	player.callback_mode_process=AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL
 	for n in player.get_animation_list():names[n]=true
@@ -314929,6 +314959,7 @@ config/features=PackedStringArray("4.7", "Forward Plus")
 
 [display]
 
+window/dpi/allow_hidpi.web=false
 window/size/viewport_width=1280
 window/size/viewport_height=720
 window/size/window_width_override=1280
@@ -314941,6 +314972,9 @@ enabled=PackedStringArray("res://addons/terrain_3d/plugin.cfg")
 
 [rendering]
 
+lights_and_shadows/positional_shadow/soft_shadow_filter_quality.web=0
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality.web=0
+lights_and_shadows/directional_shadow/size.web=2048
 renderer/rendering_method.mobile="gl_compatibility"
 ; Web build: same depth-prepass-off the desktop launchers add, and no MSAA on a phone browser
 driver/depth_prepass/enable.web=false
@@ -314955,7 +314989,8 @@ anti_aliasing/quality/use_debanding=true
 [editor]
 
 export/convert_text_resources_to_binary=false
-uid://b6232wphkekmc
+              uid://dmpej0adttt5e
+            uid://b6232wphkekmc
             uid://ditan5g53w5ln
             uid://dlp813mqv6rb7
             res://character/lavender/Lavender_A.scn
@@ -341549,7 +341584,4 @@ f?¦.?ªïe?Ì0?åÆd?­.?¸”d?Ì0?ó&c?&Ä.?*c?0¼0?Gwa?²¼.?Jma?n0?Ì_?$Ÿ.?jÃ_?<‚0?Ü3
 U?hÖ?Ìj?4)?µ?´ä?0-?3?ìJ?Vˆ	?† ?#>?ı' ?K	?cÚ!?ŸO?s"? 	?„¦#?g?îĞ#?×½	?<g%?ß‹?FG??¤?,˜%?`ç	?¦*??Tx?A?\?Üî@?Ír?¯ÚB?S?ĞB?tm?$ÀD?}ş?½D?ªa?YºD?êÅ?„ŸF?*S?¾ŸF?‹¸?²¦F?ê?f%? .n>”lH?È¯?(ö&?ğ£m> qH?ã?5‡(?¨3m>t‚H?Ò}?Šğ&?´Şt>Ò~(?¼kt>4*?¨ t>Px(?\|>£*?¸«{>i{+?xw{>'*?~Â>ß„+?¢>"ò,?Jœ>ß‘+?jx…>Ä;>¦ø?È-?Zj…>´">Læ?v.?ôŸ…>¢>Æó?4-?‰>oo">zğ?Ğ«.?T6‰>ß'>†ê?Ô#0?æ‰>É_">jÿ ?>Z(>2û ?wy0?š“Œ>ş_->?å ?íó1?äŒ>ùÇ6?_id?¸•q? Üú;ù'>M#?jã4?Dc?a¡->Ä#?É	5?4d?'	5?Òâe?uò2?f´d?Åö2?.ûe?	3?géf?îÔ2?7&c?¦¼!>¬#?÷¨4?¿oa?­¸2?"|a?8>æ#?²Š4?zÙ_?R›2?Ú_?Çr>:#?)j4?L^?ƒ€2?D^? ¶>M#?àJ4?Å¶\?yl2?­\?Â>à#?ë54?á$[?@[2?Ê[?³[>çô"?U#4?n•Y?ÃK2?R‡Y?Óbÿ= å"?$4?¬X?¤>2?öW?Tô=öÓ"?3ş3?æwV?22?tfV?”R0?ÖUV?ß%2?AÖT?O0?æÂT?Bu.?7²T?hI0?L/S?°u.?Ç S?8¡>z ¸>×³,?&'S?åx.?‰Q?üJ>—¸>½,?7–Q?õ;>àæ»>¯ë>üˆ¸>zÆ,?}P?¾í>\Î»>Õö>:`¿>é$÷=–±»>5÷= .¿>’åö=8çÂ>ÿÈ>Ì/Ã>ÄĞõ=\—Æ>ŞP>>øÆ>Äáó=®.Ê>È¨æ>-hP?FU >‚´Ê>ñ`æ>pR?ûwã>oMP?æã>WèQ?
 áß>iP?åcß>ı­Q?^AÜ>ÍO?0µÛ>¤iQ?ÁØ>H…O?.Ø>Ğ"Q?GÕ>L7O?â–?Í?•îÔ>OÕP?ïŸ?è%?ï?ŠÖ?>-?2.?)Á?lè?¨Ù?2>?ô?¾’?Å ?N?ÛÁ?\¡? ã?ªñ?«!?t¯?_³!?˜ ?qT#?¬½?0|#?p?ú
 %?Ï×?«‚??e"?P7%?¾0?“e??¿ ?ì.A?V"?İA?†³ ?3ôB?åH"?aæB?© ?XÉD?ƒ8"?½ÄD??› ?¸œF?V("?õ›F?¶Š ?hF? í?¯´ ?Dùo>·ZH?Õz ?şF"?¼go>VbH?òß?Ø#?”Ïn>diH?*F?`G"?üzv>™Ù#?`şu>7g%?Üqu>ã#?d{}>©o%?˜}>ó&?ü”|>z%?Öc‚>ó'?¼9‚>Z(?úú>óH>8?ñ'?††><›(?>ß…>è*?È©…>q7>|?k¾(?ˆ‰>±®>u?:*?m‰>î>û?¼¯+?^;‰>W©>†!?g3>Ã!?¹>2 !?ë >Z!?¢>?;'?‰>çZ>Ã!?Ğÿ >õ?ü¸ >ü ?Àö=Ì?[&ö= ò ?o{ë=˜ ?•Óê=Ææ ?Ğ²è=vÂ"?Kë3?éT?Çuß=6İ ?dİ=¼²"?‚Ø3?°ZS?{2?ODS?®ûÑ=€¢"?	Ä3?¨ÊQ?W2??±Q?C0?ˆ›Q?úÿ1?YP?ö=0?­P?Q|.?ùO?<0?lN?j€.?ÆaN?÷=zr¸>Ï,?tmN?m‡.?çÇL?Dê=<e¸>XÜ,?ØL?•bê= »>êA+?ÜõL?‡æ,?AK?´“İ=Ài»>SP+?¸^K?‹³İ=H»¾>!ê=Àö¾>öWİ=¸JÂ>ù/ê=\œÂ>‘;Ü=àÁÅ>Qé=5Æ>Ú=˜'É>ªQç>Û,M?uç=¤­É>1üæ>sËN?;ä>TM?#Ûã>c®N?›Éà>WÚL?jXà>uN?‚Eİ>ÖšL?™ÆÜ>ò3N?KÜÙ>hRL?.RÙ>ëëM?ÈÖ>L?Ñ}?´?:,Ö>“›M?ÏŒ?Ìq?+ó?$?	?ß}?'?õ9?ù§?­‘?ƒ??ÈJ?³_?b£?Á?bù?Ò!?C°?®D!?.?Gi!?]?&#?Š?+#?(i?L®$?w%?"Ã??t¯%?ùÜ$?è~?¢??¶
-$?\]A?<œ%?UEA?ôø#?TC?°Š%?pC?@ê#?ÆİD?¹t%?µÑD?‚Ö#?£F?`%?NŸF?™Ã#?û?äğq>QH?$N%??HEq>1QH?³#?9!?xp>TH?P"?ÿ–?øüw>!'?„pw> ¶ ?Èñv>4:?<¼~>Å ?|Q~>}S"?$ã}>”Ú ?Ú‚>od"?à­‚>xî#?…‚>Ñê=˜#?Ê€"?LM†>Wıõ=© ?‰$?z.†>ß  >í?!%?¢†>ÖŸß=°&?È÷ ?`m†>ÌAà=¨ş?ôjÔ=E*?tn?(†>€Õ=Ñş?90Ô=óÕ ?°b5?úäQ?!ØÉ=‘ı?åûÈ=Ï ?1O5??TP?f´3?Å9P?ÙÌ½=[Ç ?á<5?¼ÃN?§3?G¦N?Uø1?í‡N?­œ3?úM?ò1?ÄğL?3<0?lÒL?£î1?NYK?û@0?8K?ÿ.?"/K?«F0?|ŸI?ì—.?C˜I?‰ó,?¬¨I?â¥.?ÀÿG?#-?H?İÃ=fşº>Mf+?)H?Û¶Ğ=æ6»>ÿY+?ÏÃI?÷ÎÃ=*;¾>5ÅĞ=L¾>ZNÃ=^§Á>?WĞ=øÁ>ÒÂ=ôÄ>â-Ï=RZÅ> NÀ=¬$È>nôç> òI?¿BÍ=£È>p§ç>f‘K?­÷ä>JØI?Àšä>ØtK?Á§á>À¦I?07á>@K?AŞ>ËgI?EÂİ>îK?{õÚ>(I?£hÚ>¸J?pş×>ÓÆH?[?Şb?ªc×>ÛdJ?$k?~»?­É?€p?}İ?²Ê?¢W?8?r?êİ?Îÿ?t?0?2î?² ?Vœ?£× ?@ú?@û ?IW?ş‰"??´±"?b?Ù"?>»?T$?âq?	@?º÷(?Í$?¨Ì?{æ??vT'?%“A?Cß(?7wA?>'?õ>C?ÔÆ(?!)C?B('?
-ùD?¨®(?ëêD?2'?İ´F?´–(?s«F?:ü&?©Ó?|Js>[H?L„(?èg?€¢r>"WH?²è&?×à? ày>s?9y>c?H“x>q?„€>ş?\¦>®?$,>õ=?daƒ>ˆÇ?Â.ƒ>ĞP?2ƒ>gFÉ=º.?Ìç?”¯†>µ0¾=ß1?ña?ÖĞ†>%¯¾=•ú?Ú³=ê2?™Ú?Øñ†>Ç©³=šõ?Ó?.Š>É§²=²¼ ?(-5?i4M?£¿¨=ğ?ùy?r7Š>fx§=¤° ?5?¥K?’3?×}K?fƒœ=œ¥ ?Ö5?rJ?|3?zèI?Şî1?(¿I?3?OH?Iô1?&%H?iO0?ìH?ú1?&…F?·[0?QkF?µ.?–gF?·b0?dËD?uÁ.?bÌD?]'-?ÜD?-?¼wF?#ª=Ìtº>“+?÷òD?é·=¼º>y+?oF?˜æ©=fœ½>…Ù¶=ìğ½>f7©=ŞÿÀ>sA¶=˜TÁ>ø§=d&Ä>/µ="ŒÄ>ÆS¦=Î5Ç>4è>;³F?‹R³=¨Ç>‰?è>,RH?¹å>÷F?#Yå>x<H?•”â>ÄqF?Ûâ>4H?vTß>4F?ÇŞ>ÎG?×Ü>DäE?c‡Û>^~G?¶)Ù>F‹E?Ó@?ô¯?D”Ø>)G?fL?|	?=¨?%½?¸?B?Ğ$?Ë?¢>?€%?B½?g×?­İ?Å1?Ee ?Hß?Š ?b=?‰"?*é?6"?zJ?“a"?y©?sĞ#?ôW?ïü#?j·?[)$? ?#+@?™™*?6}%?°Ì?ËÍA?²,?U­%?æ,?1°A?J*?}mC?”,?AWC?Ìc*?¿E?2æ+?GE?<J*? ËF?TÎ+?OÀF?2*?¾°?Ì¯t>|fH?¶+?bB?ˆt>/]H?Â*?$Å?d:{>ıP?lŒz>Áæ?z >ıq?®€>?v`€>±˜?~„>Š$?Øƒ>f²?fšƒ>3P¨=2?ŸO?¢(‡>N‚=Ö6?TÅ?‚h‡>Ú=®í?.³’=Á??Ñ;?N®‡>ğ’=î?sa?ì›Š>t‘=6 ?M5?f}H?ˆ=ñ?}Ò?<ŞŠ>¼:†=§— ?N5?êàF?3?3¯F?ÿ‚u=ö‹ ?;ı4?>E?]‰3?E?
-ı1?¸ßD?Œ‚3?g^C?Hö1?F7C?Á`0?è'C?‘é1?3A?F[0?âwA?1Ò.?ºzA?YÍ.?)C?8F-?LA?Í:-?™:C?â =–Ô¹>·+?¦°A?ò-=4(º>ó©+?>TC?³=ê¼>=¶E½>5="<À>-Eœ=¦À> Ê=ÎFÃ>áèš=Ô·Ã>Ö!Œ=ˆ4Æ>2é>õkC?¦G™=
-´Æ>?İè>ÚE?`’æ>¨XC?±#æ>•ıD?—ã>Ú3C?±ã>ÓD?pkà>UşB?Ôáß>h™D?QGİ>P³B?\¯Ü>İLD?EnÚ>[B?±?§ó? ÉÙ>øòC?ø/?R?Ğ~?Â?Ø•?­c?Có?ˆ?ß?Şq?^€?ì?iŸ?ê{?ê( ??¾E ?Ä?ùÑ!?¤?Èë!?6‡?Éj#?z*?E#?v”?f¦#?>÷?yû$?¦¥?*B?qò0?e%?„?mB?ŞV/?úM%?)j?VêA?ù¹-? šC?®8/?ƒC?£-?é>E?f/?§-E?€-?×åF?Wû.?2×F?dg-?¯›?t;v>ß|H?=Ù.?d$?äxu>cnH?&J-?·¸?|–|>ş;?æ{>‰İ?
+$?\]A?<œ%?UEA?ôø#?TC?°Š%?pC?@ê#?ÆİD?¹t%?µÑD?‚Ö#?£F?`%?NŸF?™Ã#?û?äğq>QH?$N%??HEq>1QH?³#?9!?xp>TH?P"?ÿ–?øüw>!'?„pw> ¶ ?Èñv>4:?<¼~>Å ?|Q~>}S"?$ã}>”Ú ?Ú‚>od"?à­‚>xî#?…‚>Ñê=˜#?Ê€"?LM†>Wıõ=© ?‰$?z.†>ß  >í?!%?¢†>ÖŸß=°&?È÷ ?`m†>ÌAà=¨ş?ôjÔ=E*?tn?(†>€Õ=Ñş?90Ô=óÕ ?°b5?úäQ?!ØÉ=‘ı?åûÈ=Ï ?1O5??TP?f´3?Å9P?ÙÌ½=[Ç ?á<5?¼ÃN?§3?G¦N?Uø1?í‡N?­œ3?úM?ò1?ÄğL?3<0?lÒL?£î1?NYK?û@0?8K?ÿ.?
