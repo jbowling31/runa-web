@@ -5,6 +5,9 @@ It's a test build for playing on a phone in the browser (Safari on iPhone).
 
 **Play:** https://jbowling31.github.io/runa-web/
 
+- **Watch the AI play it:** add `?ai=veteran` (or `casual` / `action`) to the link, for example
+  https://jbowling31.github.io/runa-web/?ai=casual&class=Stormstrider&party=veteran
+  (`class` = the hero's class, `party` = how the four AI members play; both optional).
 - First load downloads about 480 MB, so use Wi-Fi. After that, the browser usually keeps it.
 - The game file (`index.pck`, 430 MB) is over GitHub's 100 MB file limit, so it's stored in `pck_parts/` and the
   Pages workflow joins it back together when it publishes.
