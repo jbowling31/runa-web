@@ -1,12 +1,10 @@
 # Publishes the RUNA web build to GitHub Pages.
-# The game file (index.pck, ~430 MB) is over GitHub's 100 MB file limit for repos, so it lives on the latest
-# Release; this workflow puts it next to the web files and deploys the whole site.
+# The game file (index.pck, ~430 MB) is over GitHub's 100 MB file limit for repos, so it is stored in 90 MB pieces
+# (pck_parts/); this workflow joins them next to the web files and deploys the whole site.
 name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
-  release:
-    types: [published]
   workflow_dispatch:
 permissions:
   contents: read
@@ -24,12 +22,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Assemble the site
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           mkdir site
           cp index.* libterrain.web.release.wasm32.wasm site/
-          gh release download --repo "$GITHUB_REPOSITORY" --pattern index.pck --dir site
+          cat pck_parts/index.pck.part* > site/index.pck
+          sha256sum site/index.pck
           ls -la site
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
