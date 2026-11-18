@@ -24,7 +24,7 @@ jobs:
       - name: Assemble the site
         run: |
           mkdir site
-          cp index.* libterrain.web.release.wasm32.wasm site/
+          cp index.* libterrain.web.*.wasm site/
           cat pck_parts/index.pck.part* > site/index.pck
           sha256sum site/index.pck
           ls -la site
